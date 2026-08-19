@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>悦食BI · 门店经营看板</title>
+<script src="/static/echarts.min.js"></script>
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --purple: #5B21B6;
+  --purple-light: #7C5CE0;
+  --dark: #1a1a2e;
+  --bg: #F6F6F9;
+  --card-border: #E4E4EC;
+  --text-sub: #6B6B7B;
+  --up: #DC2626;
+  --down: #16A34A;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg);
+  color: var(--dark);
+  min-height: 100vh;
+}
+
+/* ============ 顶栏 ============ */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 24px;
+  height: 60px;
+  background: #fff;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.brand svg {
+  width: 26px; height: 26px;
+  background: var(--purple);
+  padding: 4px;
+  border-radius: 6px;
+}
+
+.brand em { font-style: normal; color: var(--purple); }
+
+.date-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 28px;
+  flex-wrap: wrap;
+}
+
+.date-filter input[type="date"] {
+  height: 34px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--dark);
+  background: #fff;
+  outline: none;
+}
+
+.date-filter input[type="date"]:focus { border-color: var(--purple); }
+
+.quick-btn {
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--card-border);
+  border-radius: 17px;
+  background: #fff;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-sub);
+  cursor: pointer;
+  transition: all .2s;
+}
+
+.quick-btn:hover { border-color: var(--purple); color: var(--purple); }
+.quick-btn.active {
+  background: var(--purple);
+  border-color: var(--purple);
+  color: #fff;
+}
+
+.user-area {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar {
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  background: #EDE6FA;
+  color: var(--purple);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.username { font-size: 14px; font-weight: 500; }
+
+.btn-logout {
+  height: 34px;
+  padding: 0 16px;
+  border: 1px solid var(--card-border);
+  border-radius: 17px;
+  background: #fff;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-sub);
+  cursor: pointer;
+  transition: all .2s;
+}
+
+.btn-logout:hover { border-color: #dc2626; color: #dc2626; }
+
+/* ============ 主体 ============ */
+.container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 20px 24px 80px;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.kpi-card {
+  background: #fff;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 18px 20px;
+}
+
+.kpi-card .label { font-size: 13px; color: var(--text-sub); margin-bottom: 8px; }
+.kpi-card .value { font-size: 26px; font-weight: 600; letter-spacing: -0.5px; }
+
+.kpi-card .compare {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.kpi-card .compare .up { color: var(--up); }
+.kpi-card .compare .down { color: var(--down); }
+
+.chart-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.bottom-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 14px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 18px 20px;
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.card-title .sub { font-size: 12px; font-weight: 400; color: var(--text-sub); }
+
+#trendChart { width: 100%; height: 320px; }
+#payChart { width: 100%; height: 320px; }
+#storeChart { width: 100%; height: 260px; }
+#catChart { width: 100%; height: 240px; }
+
+.right-stack { display: flex; flex-direction: column; gap: 14px; }
+
+/* ============ Top10 表 ============ */
+.top-table { width: 100%; border-collapse: collapse; }
+
+.top-table th {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-sub);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.top-table th.num, .top-table td.num { text-align: right; }
+
+.top-table td {
+  padding: 10px;
+  font-size: 14px;
+  border-bottom: 1px solid #F1F1F6;
+}
+
+.top-table tr:last-child td { border-bottom: none; }
+.top-table tr:hover td { background: #FAF9FD; }
+
+.rank-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.r1 { background: var(--purple); color: #fff; }
+.r2 { background: var(--purple-light); color: #fff; }
+.r3 { background: #A78BFA; color: #fff; }
+.r4, .r5 { background: #EDE6FA; color: var(--purple); }
+.r6p { background: #F1F1F6; color: var(--text-sub); }
+
+.cat-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  background: #F4F1FB;
+  color: var(--purple);
+}
+
+.share-bar {
+  position: relative;
+  background: #F1F1F6;
+  border-radius: 4px;
+  height: 6px;
+  width: 90px;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+
+.share-bar i {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  border-radius: 4px;
+  background: var(--purple-light);
+}
+
+.empty-tip {
+  text-align: center;
+  color: var(--text-sub);
+  font-size: 13px;
+  padding: 60px 0;
+}
+
+/* ============ AI 悬浮球与抽屉 ============ */
+.ai-fab {
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  width: 54px; height: 54px;
+  border-radius: 50%;
+  background: var(--purple);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(91,33,182,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform .2s, background .2s;
+  z-index: 90;
+}
+
+.ai-fab:hover { transform: scale(1.08); background: #4C1D95; }
+
+.ai-fab svg { width: 26px; height: 26px; }
+
+.ai-drawer {
+  position: fixed;
+  right: 28px;
+  bottom: 96px;
+  width: 380px;
+  max-height: 560px;
+  background: #fff;
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(26,26,46,0.16);
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 90;
+}
+
+.ai-drawer.open { display: flex; }
+
+.ai-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--card-border);
+  background: linear-gradient(135deg, #F7F4FD, #fff);
+}
+
+.ai-header .dot {
+  width: 32px; height: 32px;
+  border-radius: 10px;
+  background: var(--purple);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ai-header .title { font-size: 14px; font-weight: 600; }
+.ai-header .sub { font-size: 12px; color: var(--text-sub); }
+.ai-close {
+  margin-left: auto;
+  border: none;
+  background: none;
+  font-size: 20px;
+  color: var(--text-sub);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.ai-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 200px;
+}
+
+.msg { max-width: 85%; font-size: 13px; line-height: 1.6; }
+
+.msg.ai {
+  align-self: flex-start;
+  background: #F4F1FB;
+  color: var(--dark);
+  padding: 10px 14px;
+  border-radius: 12px 12px 12px 4px;
+}
+
+.msg.user {
+  align-self: flex-end;
+  background: var(--purple);
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 12px 12px 4px 12px;
+}
+
+.ai-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+
+.ai-suggest button {
+  border: 1px solid #DDD3F5;
+  background: #FBFAFE;
+  color: var(--purple);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 5px 12px;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: all .2s;
+}
+
+.ai-suggest button:hover { background: #F1EAFD; }
+
+.ai-input {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--card-border);
+}
+
+.ai-input input {
+  flex: 1;
+  height: 40px;
+  border: 1px solid var(--card-border);
+  border-radius: 20px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.ai-input input:focus { border-color: var(--purple); }
+
+.ai-input button {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: var(--purple);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .2s;
+}
+
+.ai-input button:hover { background: #4C1D95; }
+.ai-input button:disabled { background: #C4B5FD; cursor: not-allowed; }
+
+/* toast */
+.toast {
+  position: fixed;
+  top: 76px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--dark);
+  color: #fff;
+  font-size: 13px;
+  padding: 10px 20px;
+  border-radius: 10px;
+  display: none;
+  z-index: 99;
+}
+
+/* ============ 响应式 ============ */
+@media (max-width: 1024px) {
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .chart-row, .bottom-row { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  .kpi-grid { grid-template-columns: 1fr; }
+  .date-filter { margin-left: 0; }
+  .username { display: none; }
+  .ai-drawer { right: 12px; left: 12px; width: auto; }
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M12 2L15 9H9L12 2Z"/><path d="M12 22L9 15H15L12 22Z"/><path d="M2 12L9 9V15L2 12Z"/><path d="M22 12L15 15V9L22 12Z"/></svg>
+    <span>悦食<em>BI</em> · 门店经营看板</span>
+  </div>
+
+  <div class="date-filter">
+    <input type="date" id="startDate">
+    <span style="color:var(--text-sub);font-size:13px;">至</span>
+    <input type="date" id="endDate">
+    <button class="quick-btn" data-days="7">近7天</button>
+    <button class="quick-btn" data-days="30">近30天</button>
+    <button class="quick-btn" data-days="all" id="btnAll">全部</button>
+  </div>
+
+  <div class="user-area">
+    <div class="avatar" id="avatar">A</div>
+    <span class="username" id="username">admin</span>
+    <button class="btn-logout" id="btnLogout">退出登录</button>
+  </div>
+</header>
+
+<main class="container">
+  <!-- KPI -->
+  <section class="kpi-grid">
+    <div class="kpi-card">
+      <div class="label">总营业额</div>
+      <div class="value" id="kpiRevenue">--</div>
+      <div class="compare" id="kpiRevenueCmp">--</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label">订单数</div>
+      <div class="value" id="kpiOrders">--</div>
+      <div class="compare" id="kpiOrdersCmp">--</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label">客单价</div>
+      <div class="value" id="kpiAov">--</div>
+      <div class="compare" id="kpiAovCmp">--</div>
+    </div>
+    <div class="kpi-card">
+      <div class="label">销售件数</div>
+      <div class="value" id="kpiItems">--</div>
+      <div class="compare" id="kpiItemsCmp">--</div>
+    </div>
+  </section>
+
+  <!-- 趋势 + 支付方式 -->
+  <section class="chart-row">
+    <div class="card">
+      <div class="card-title">每日营业额趋势</div>
+      <div id="trendChart"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">支付方式占比<span class="sub">按订单笔数</span></div>
+      <div id="payChart"></div>
+    </div>
+  </section>
+
+  <!-- Top10 + 门店/品类 -->
+  <section class="bottom-row">
+    <div class="card">
+      <div class="card-title">
+        Top 10 畅销商品
+        <span class="sub">按销售额排序</span>
+      </div>
+      <div id="topTableWrap">
+        <table class="top-table">
+          <thead>
+            <tr>
+              <th style="width:50px;">排名</th>
+              <th>商品</th>
+              <th style="width:80px;">品类</th>
+              <th class="num" style="width:90px;">销量</th>
+              <th class="num" style="width:110px;">销售额</th>
+              <th class="num" style="width:130px;">占比</th>
+            </tr>
+          </thead>
+          <tbody id="topTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="right-stack">
+      <div class="card">
+        <div class="card-title">门店排行<span class="sub">按营业额</span></div>
+        <div id="storeChart"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">品类结构<span class="sub">按销售额</span></div>
+        <div id="catChart"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- AI 助手（预留模块） -->
+<button class="ai-fab" id="aiFab" title="AI 助手">
+  <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    <path d="M8 10h.01M12 10h.01M16 10h.01"/>
+  </svg>
+</button>
+
+<div class="ai-drawer" id="aiDrawer">
+  <div class="ai-header">
+    <div class="dot">AI</div>
+    <div>
+      <div class="title">经营分析助手</div>
+      <div class="sub">AI 模块开发中 · 当前为占位回复</div>
+    </div>
+    <button class="ai-close" id="aiClose">×</button>
+  </div>
+  <div class="ai-messages" id="aiMessages"></div>
+  <div class="ai-suggest" id="aiSuggest">
+    <button data-q="上周哪家门店营业额最高？">上周哪家门店营业额最高？</button>
+    <button data-q="分析一下客单价变化趋势">分析一下客单价变化趋势</button>
+    <button data-q="帮我生成今日经营日报">帮我生成今日经营日报</button>
+  </div>
+  <div class="ai-input">
+    <input type="text" id="aiInput" placeholder="输入问题，回车发送…" maxlength="200">
+    <button id="aiSend" title="发送">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+    </button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ============ 基础 ============
+const token = localStorage.getItem('token');
+if (!token) location.href = '/';
+
+const username = localStorage.getItem('username') || 'admin';
+const nickname = localStorage.getItem('nickname') || username;
+document.getElementById('username').textContent = nickname;
+document.getElementById('avatar').textContent = nickname.charAt(0).toUpperCase();
+
+function fmtMoney(v) {
+  return '¥' + Number(v || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtInt(v) { return Number(v || 0).toLocaleString('zh-CN'); }
+
+function toast(text) {
+  const el = document.getElementById('toast');
+  el.textContent = text;
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 2200);
+}
+
+async function apiFetch(url, options = {}) {
+  const resp = await fetch(url, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + token,
+      ...(options.headers || {})
+    }
+  });
+  if (resp.status === 401) {
+    localStorage.removeItem('token');
+    location.href = '/';
+    throw new Error('登录已过期');
+  }
+  return resp;
+}
+
+// ============ 退出登录 ============
+document.getElementById('btnLogout').addEventListener('click', async () => {
+  try { await apiFetch('/api/logout', { method: 'POST' }); } catch (_) {}
+  localStorage.removeItem('token');
+  localStorage.removeItem('username');
+  location.href = '/';
+});
+
+// ============ 日期筛选 ============
+const startDateEl = document.getElementById('startDate');
+const endDateEl = document.getElementById('endDate');
+let meta = null;
+
+function setQuickActive(btn) {
+  document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+}
+
+function daysAgo(n) {
+  const end = new Date(meta.max_date);
+  const start = new Date(meta.max_date);
+  start.setDate(start.getDate() - (n - 1));
+  return [start.toISOString().slice(0, 10), end.toISOString().slice(0, 10)];
+}
+
+document.querySelectorAll('.quick-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (!meta) return;
+    setQuickActive(btn);
+    if (btn.dataset.days === 'all') {
+      startDateEl.value = meta.min_date;
+      endDateEl.value = meta.max_date;
+    } else {
+      const [s, e] = daysAgo(parseInt(btn.dataset.days));
+      startDateEl.value = s;
+      endDateEl.value = e;
+    }
+    load();
+  });
+});
+
+function onDateChange() {
+  setQuickActive(null);
+  if (startDateEl.value && endDateEl.value && startDateEl.value <= endDateEl.value) load();
+}
+startDateEl.addEventListener('change', onDateChange);
+endDateEl.addEventListener('change', onDateChange);
+
+// ============ 图表实例 ============
+const PURPLE_RAMP = ['#5B21B6', '#7C5CE0', '#A78BFA', '#C4B5FD', '#DDD0FE'];
+const trendChart = echarts.init(document.getElementById('trendChart'));
+const payChart = echarts.init(document.getElementById('payChart'));
+const storeChart = echarts.init(document.getElementById('storeChart'));
+const catChart = echarts.init(document.getElementById('catChart'));
+
+window.addEventListener('resize', () => {
+  trendChart.resize(); payChart.resize(); storeChart.resize(); catChart.resize();
+});
+
+// ============ KPI 渲染 ============
+function cmpHtml(pct) {
+  if (pct === null || pct === undefined) return '暂无环比数据';
+  const cls = pct >= 0 ? 'up' : 'down';
+  const arrow = pct >= 0 ? '▲' : '▼';
+  return `环比上期 <span class="${cls}">${arrow} ${Math.abs(pct).toFixed(1)}%</span>`;
+}
+
+function renderKpi(kpi) {
+  document.getElementById('kpiRevenue').textContent = fmtMoney(kpi.revenue);
+  document.getElementById('kpiOrders').textContent = fmtInt(kpi.orders);
+  document.getElementById('kpiAov').textContent = fmtMoney(kpi.aov);
+  document.getElementById('kpiItems').textContent = fmtInt(kpi.items);
+  const c = kpi.compare || {};
+  document.getElementById('kpiRevenueCmp').innerHTML = cmpHtml(c.revenue);
+  document.getElementById('kpiOrdersCmp').innerHTML = cmpHtml(c.orders);
+  document.getElementById('kpiAovCmp').innerHTML = cmpHtml(c.aov);
+  document.getElementById('kpiItemsCmp').innerHTML = cmpHtml(c.items);
+}
+
+// ============ 趋势图 ============
+function renderTrend(daily, meta) {
+  const dates = daily.map(d => d.date);
+  const revenues = daily.map(d => d.revenue);
+  const aovs = daily.map(d => d.aov);
+  const orders = daily.map(d => d.orders);
+
+  trendChart.setOption({
+    title: {
+      text: meta.start === meta.end ? meta.start : (meta.start + ' ~ ' + meta.end),
+      right: 0, top: 0,
+      textStyle: { color: '#9CA0AB', fontSize: 12, fontWeight: 400 }
+    },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: '#fff',
+      borderColor: '#E4E4EC',
+      textStyle: { color: '#1a1a2e', fontSize: 12 },
+      formatter(params) {
+        const i = params[0].dataIndex;
+        return `<b>${dates[i]}</b><br/>
+          营业额：${fmtMoney(revenues[i])}<br/>
+          订单数：${fmtInt(orders[i])}<br/>
+          客单价：${fmtMoney(aovs[i])}`;
+      }
+    },
+    legend: {
+      data: ['营业额', '客单价'],
+      top: 6, left: 'center', itemGap: 18,
+      itemWidth: 16, itemHeight: 10,
+      textStyle: { color: '#6B6B7B', fontSize: 12 }
+    },
+    grid: { left: 16, right: 44, top: 48, bottom: 8, containLabel: true },
+    xAxis: {
+      type: 'category', data: dates,
+      axisLine: { lineStyle: { color: '#E4E4EC' } },
+      axisTick: { show: false },
+      axisLabel: { color: '#6B6B7B', fontSize: 11 }
+    },
+    yAxis: [
+      {
+        type: 'value',
+        splitLine: { lineStyle: { color: '#F1F1F6' } },
+        axisLabel: {
+          color: '#6B6B7B', fontSize: 11,
+          formatter: v => v >= 1000 ? (v / 1000) + 'k' : v
+        }
+      },
+      {
+        type: 'value',
+        splitLine: { show: false },
+        axisLabel: {
+          color: '#6B6B7B', fontSize: 11,
+          formatter: v => v.toFixed(0)
+        }
+      }
+    ],
+    series: [
+      {
+        name: '营业额', type: 'bar', data: revenues,
+        barMaxWidth: 26,
+        itemStyle: { color: '#7C5CE0', borderRadius: [4, 4, 0, 0] }
+      },
+      {
+        name: '客单价', type: 'line', yAxisIndex: 1, data: aovs,
+        smooth: true, symbolSize: 6,
+        lineStyle: { color: '#F59E0B', width: 2.5 },
+        itemStyle: { color: '#F59E0B' }
+      }
+    ]
+  }, true);
+}
+
+// ============ 支付方式环图 ============
+function renderPay(payments, totalOrders) {
+  payChart.setOption({
+    tooltip: {
+      trigger: 'item',
+      formatter: p => `${p.name}<br/>${fmtInt(p.value)} 笔（${p.percent}%）`
+    },
+    legend: {
+      bottom: 0, icon: 'circle', itemWidth: 10, itemHeight: 10,
+      textStyle: { color: '#6B6B7B', fontSize: 12 }
+    },
+    series: [{
+      type: 'pie',
+      radius: ['46%', '68%'],
+      center: ['50%', '44%'],
+      label: {
+        show: true, position: 'center',
+        formatter: `{a|${fmtInt(totalOrders)}}\n{b|笔订单}`,
+        rich: {
+          a: { fontSize: 20, fontWeight: 600, color: '#1a1a2e', lineHeight: 26 },
+          b: { fontSize: 12, color: '#6B6B7B' }
+        }
+      },
+      emphasis: { label: { show: true } },
+      data: payments.map((p, i) => ({
+        name: p.name, value: p.value,
+        itemStyle: { color: PURPLE_RAMP[i % PURPLE_RAMP.length] }
+      })),
+      labelLine: { show: false }
+    }]
+  }, true);
+}
+
+// ============ 门店排行 ============
+function renderStores(stores) {
+  const names = stores.map(s => s.name + '\n' + s.district);
+  storeChart.setOption({
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: '#fff', borderColor: '#E4E4EC',
+      textStyle: { color: '#1a1a2e', fontSize: 12 },
+      formatter(params) {
+        const s = stores[params[0].dataIndex];
+        return `<b>${s.name}</b>（${s.category} · ${s.district}）<br/>
+          营业额：${fmtMoney(s.revenue)}<br/>订单数：${fmtInt(s.orders)}`;
+      }
+    },
+    grid: { left: 8, right: 40, top: 8, bottom: 8, containLabel: true },
+    xAxis: {
+      type: 'value', show: false,
+      max: v => Math.ceil(v.max * 1.05)
+    },
+    yAxis: {
+      type: 'category', data: names.reverse(),
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: { color: '#1a1a2e', fontSize: 11, lineHeight: 15 }
+    },
+    series: [{
+      type: 'bar',
+      data: stores.slice().reverse().map((s, i) => ({
+        value: s.revenue,
+        itemStyle: { color: PURPLE_RAMP[(stores.length - 1 - i) % PURPLE_RAMP.length], borderRadius: [0, 6, 6, 0] }
+      })),
+      barMaxWidth: 16,
+      label: {
+        show: true, position: 'right',
+        color: '#6B6B7B', fontSize: 11,
+        formatter: p => (p.value / 10000).toFixed(1) + '万'
+      }
+    }]
+  }, true);
+}
+
+// ============ 品类结构 ============
+function renderCategories(categories) {
+  catChart.setOption({
+    tooltip: {
+      trigger: 'item',
+      formatter: p => `${p.name}<br/>${fmtMoney(p.value)}（${p.percent}%）`
+    },
+    series: [{
+      type: 'pie',
+      radius: ['40%', '62%'],
+      center: ['50%', '46%'],
+      label: { color: '#6B6B7B', fontSize: 11, formatter: '{b} {d}%' },
+      labelLine: { length: 8, length2: 6 },
+      data: categories.map((c, i) => ({
+        name: c.name, value: c.value,
+        itemStyle: { color: PURPLE_RAMP[i % PURPLE_RAMP.length] }
+      }))
+    }]
+  }, true);
+}
+
+// ============ Top10 表 ============
+function renderTop(topProducts) {
+  const tbody = document.getElementById('topTbody');
+  if (!topProducts.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-tip">当前区间暂无销售数据</td></tr>';
+    return;
+  }
+  tbody.innerHTML = topProducts.map(p => {
+    const rcls = p.rank <= 3 ? 'r' + p.rank : (p.rank <= 5 ? 'r' + p.rank : 'r6p');
+    const barW = Math.min(100, p.share / (topProducts[0].share || 1) * 100);
+    return `<tr>
+      <td><span class="rank-badge ${rcls}">${p.rank}</span></td>
+      <td>${p.name}</td>
+      <td><span class="cat-tag">${p.category}</span></td>
+      <td class="num">${fmtInt(p.qty)}</td>
+      <td class="num">${fmtMoney(p.revenue)}</td>
+      <td class="num"><span class="share-bar"><i style="width:${barW}%"></i></span>${p.share}%</td>
+    </tr>`;
+  }).join('');
+}
+
+// ============ 主加载 ============
+async function load() {
+  const params = new URLSearchParams();
+  if (startDateEl.value) params.set('start', startDateEl.value);
+  if (endDateEl.value) params.set('end', endDateEl.value);
+
+  let data;
+  try {
+    const resp = await apiFetch('/api/dashboard?' + params.toString());
+    if (!resp.ok) throw new Error((await resp.json()).detail || '加载失败');
+    data = await resp.json();
+  } catch (err) {
+    toast(err.message || '数据加载失败');
+    return;
+  }
+
+  meta = data.meta;
+  startDateEl.min = meta.min_date; startDateEl.max = meta.max_date;
+  endDateEl.min = meta.min_date; endDateEl.max = meta.max_date;
+  if (!startDateEl.value) startDateEl.value = meta.start;
+  if (!endDateEl.value) endDateEl.value = meta.end;
+
+  renderKpi(data.kpi);
+  renderTrend(data.daily, data.meta);
+  renderPay(data.payments, data.kpi.orders);
+  renderStores(data.stores);
+  renderCategories(data.categories);
+  renderTop(data.top_products);
+}
+
+// ============ AI 对话（预留模块） ============
+const aiDrawer = document.getElementById('aiDrawer');
+const aiMessages = document.getElementById('aiMessages');
+const aiInput = document.getElementById('aiInput');
+const aiSend = document.getElementById('aiSend');
+
+document.getElementById('aiFab').addEventListener('click', () => {
+  aiDrawer.classList.toggle('open');
+  if (aiDrawer.classList.contains('open') && !aiMessages.children.length) {
+    appendMsg('ai', '您好，我是经营分析助手。当前 AI 模块正在开发中，'
+      + '您可以直接在下方留言，功能上线后会支持自然语言查数、经营洞察与自动日报。');
+  }
+  aiInput.focus();
+});
+document.getElementById('aiClose').addEventListener('click', () => aiDrawer.classList.remove('open'));
+
+document.querySelectorAll('.ai-suggest button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    aiInput.value = btn.dataset.q;
+    sendAi();
+  });
+});
+
+function appendMsg(role, text) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.textContent = text;
+  aiMessages.appendChild(div);
+  aiMessages.scrollTop = aiMessages.scrollHeight;
+}
+
+async function sendAi() {
+  const q = aiInput.value.trim();
+  if (!q) return;
+  aiInput.value = '';
+  appendMsg('user', q);
+  aiSend.disabled = true;
+  try {
+    const chatHistory = Array.from(aiMessages.children)
+      .map(el => ({ role: el.classList.contains('ai') ? 'assistant' : 'user', content: el.textContent }))
+      .filter(m => m.content);
+    const resp = await apiFetch('/api/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify({ messages: chatHistory })
+    });
+    const data = await resp.json();
+    appendMsg('ai', data.reply || '（无回复）');
+  } catch (err) {
+    appendMsg('ai', '请求失败：' + (err.message || '网络异常'));
+  } finally {
+    aiSend.disabled = false;
+  }
+}
+
+aiSend.addEventListener('click', sendAi);
+aiInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendAi(); });
+
+// ============ 启动 ============
+(async () => {
+  try {
+    const resp = await apiFetch('/api/me');
+    if (!resp.ok) throw new Error();
+  } catch (_) {
+    location.href = '/';
+    return;
+  }
+  await load();
+})();
+</script>
+</body>
+</html>

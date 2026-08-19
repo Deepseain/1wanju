@@ -1,0 +1,4 @@
+fastapi>=0.139
+uvicorn>=0.45
+aiomysql>=0.2
+Jinja2>=3.1
