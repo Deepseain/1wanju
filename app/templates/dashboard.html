@@ -383,6 +383,22 @@ body {
   border-radius: 12px 12px 4px 12px;
 }
 
+/* AI 图表卡片（全幅，在回答文字下方） */
+.msg.chart-msg {
+  align-self: stretch;
+  max-width: 100%;
+  width: 100%;
+  background: none;
+  padding: 0;
+}
+.msg.chart-msg > div {
+  background: #fff;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 10px;
+  height: 280px;
+}
+
 .ai-suggest {
   display: flex;
   flex-wrap: wrap;
@@ -1001,6 +1017,43 @@ function appendMsg(role, text) {
   return div;
 }
 
+const aiCharts = [];
+
+function buildChartOption(spec) {
+  const palette = ['#5B21B6', '#7C5CE0', '#A78BFA', '#F59E0B', '#16A34A', '#DC2626', '#0EA5E9', '#C4B5FD'];
+  const base = {
+    color: palette,
+    tooltip: { trigger: spec.chart_type === 'pie' ? 'item' : 'axis' },
+    grid: { left: 56, right: 20, top: 44, bottom: 36, containLabel: true },
+    title: { text: spec.title, left: 'center', textStyle: { fontSize: 13, fontWeight: 600, color: '#1a1a2e' } },
+  };
+  if (spec.chart_type === 'pie') {
+    const s = spec.series[0] || { values: [] };
+    return { ...base, legend: { bottom: 0, textStyle: { fontSize: 11 } },
+      series: [{ type: 'pie', radius: ['40%', '68%'], center: ['50%', '46%'],
+        data: spec.labels.map((n, i) => ({ name: n, value: s.values[i] != null ? s.values[i] : 0 })) }] };
+  }
+  const isLine = spec.chart_type === 'line' || spec.chart_type === 'area';
+  return { ...base,
+    legend: spec.series.length > 1 ? { top: 0, textStyle: { fontSize: 11 } } : undefined,
+    xAxis: { type: 'category', data: spec.labels, axisLabel: { rotate: spec.labels.length > 8 ? 20 : 0, fontSize: 11 } },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: '#ECEAF3' } } },
+    series: spec.series.map((s) => ({ name: s.name, type: isLine ? 'line' : 'bar',
+      smooth: isLine, areaStyle: spec.chart_type === 'area' ? { opacity: 0.15 } : undefined, data: s.values })) };
+}
+
+function appendChart(spec) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ai chart-msg';
+  const el = document.createElement('div');
+  wrap.appendChild(el);
+  aiMessages.appendChild(wrap);
+  aiMessages.scrollTop = aiMessages.scrollHeight;
+  const inst = echarts.init(el);
+  inst.setOption(buildChartOption(spec));
+  aiCharts.push(inst);
+}
+
 function handleSse(raw, aiEl) {
   let event = 'message', data = '';
   for (const line of raw.split('\n')) {
@@ -1013,6 +1066,8 @@ function handleSse(raw, aiEl) {
     if (event === 'token') {
       if (!aiEl.dataset.started) { aiEl.textContent = ''; aiEl.dataset.started = '1'; }
       aiEl.textContent += d.content;
+    } else if (event === 'chart') {
+      appendChart(d);
     } else if (event === 'error') {
       aiEl.textContent = aiEl.textContent || d.message || '服务暂时不可用';
     }
@@ -1096,6 +1151,7 @@ aiInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendAi(); });
       const h = Math.max(380, Math.min(rs.h + (e.clientY - rs.sy), window.innerHeight - 16));
       aiDrawer.style.width = w + 'px';
       aiDrawer.style.height = h + 'px';
+      aiCharts.forEach(c => c.resize());
     }
   });
 

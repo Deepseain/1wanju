@@ -364,6 +364,26 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _extract_chart(output) -> dict | None:
+    """从 render_chart 工具输出里取图表规格（兼容 dict / ToolMessage.artifact / JSON 字符串）。"""
+    if isinstance(output, dict):
+        return output.get("chart")
+    if output is None:
+        return None
+    artifact = getattr(output, "artifact", None)
+    if isinstance(artifact, dict):
+        return artifact.get("chart")
+    content = getattr(output, "content", "")
+    if isinstance(content, str) and content:
+        try:
+            data = json.loads(content)
+            if isinstance(data, dict):
+                return data.get("chart")
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
 async def stream_ai(message: str, thread_id: str, username: str):
     """SSE 流式生成器：逐 token 推送最终回答，工具调用期间不推内容。"""
     if ai_agent is None:
@@ -387,6 +407,10 @@ async def stream_ai(message: str, thread_id: str, username: str):
                     yield _sse("token", {"content": content})
             elif kind == "on_tool_start":
                 yield _sse("tool", {"name": event.get("name", "")})
+            elif kind == "on_tool_end" and event.get("name") == "render_chart":
+                chart = _extract_chart(event["data"].get("output"))
+                if chart:
+                    yield _sse("chart", chart)
         yield _sse("done", {})
     except Exception as e:  # noqa: BLE001 —— 流异常不泄露内部细节
         print(f"[ai] stream error: {type(e).__name__}: {e}")

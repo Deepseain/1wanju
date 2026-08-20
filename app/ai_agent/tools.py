@@ -94,6 +94,45 @@ def _jsonable(v):
     return v
 
 
+CHART_TYPES = ("bar", "line", "pie", "area")
+
+
+async def _execute(pool, guarded: str):
+    """执行已过护栏的只读 SQL，返回 (columns, rows, truncated)。执行错误向外抛。"""
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(guarded)
+            cols = [d[0] for d in cur.description] if cur.description else []
+            raw = await cur.fetchmany(MAX_ROWS + 1)
+    truncated = len(raw) > MAX_ROWS
+    rows = [[_jsonable(v) for v in row] for row in raw[:MAX_ROWS]]
+    return cols, rows, truncated
+
+
+def build_chart_spec(chart_type: str, title: str, x: str, y, columns, rows) -> dict:
+    """把 SQL 结果行转成前端可渲染的图表规格 {chart_type, title, labels, series}。"""
+    spec = {"chart_type": chart_type, "title": title, "labels": [], "series": []}
+    if not columns or not rows:
+        return spec
+    x_idx = next((i for i, c in enumerate(columns) if str(c).lower() == (x or "").lower()), None)
+    labels = ([str(row[x_idx]) for row in rows]
+              if x_idx is not None else [str(i + 1) for i in range(len(rows))])
+    spec["labels"] = labels
+    for metric in (y or []):
+        idx = next((i for i, c in enumerate(columns) if str(c).lower() == str(metric).lower()), None)
+        if idx is None:
+            continue
+        values = []
+        for row in rows:
+            v = row[idx]
+            try:
+                values.append(float(v))
+            except (TypeError, ValueError):
+                values.append(None)
+        spec["series"].append({"name": str(metric), "values": values})
+    return spec
+
+
 def build_tools(pool, schema_cache):
     """构造进程内工具列表（闭包持有连接池与 schema 缓存）。"""
 
@@ -121,16 +160,10 @@ def build_tools(pool, schema_cache):
         if not ok:
             return {"ok": False, "error": guarded}
         try:
-            async with pool.acquire() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute(guarded)
-                    cols = [d[0] for d in cur.description] if cur.description else []
-                    raw = await cur.fetchmany(MAX_ROWS + 1)
+            cols, rows, truncated = await _execute(pool, guarded)
         except Exception as e:  # noqa: BLE001 —— 把错误回给模型，让它修正重试
             return {"ok": False, "error": f"SQL 执行失败: {type(e).__name__}: {e}"}
 
-        truncated = len(raw) > MAX_ROWS
-        rows = [[_jsonable(v) for v in row] for row in raw[:MAX_ROWS]]
         tables = _extract_tables(_strip_strings(guarded))
         if not rows:
             note = "查询结果为空"
@@ -147,4 +180,42 @@ def build_tools(pool, schema_cache):
             "note": note,
         }
 
-    return [get_schema, query_data]
+    @tool
+    async def render_chart(sql: str, chart_type: str, title: str, x: str, y: list[str]) -> dict:
+        """根据一条只读 SQL 的查询结果生成一张交互式图表（回答含图表诉求时调用）。
+
+        图表作为文字回答的补充；每个数字都由本工具真实查询产生，禁止凭空捏造。
+        sql: 只读 SELECT（约束同 query_data）
+        chart_type: 'bar'(排行/比较) / 'line'(趋势) / 'pie'(构成占比) / 'area'(面积趋势)
+        title: 图标题，写结论或问题，不写「数据分析图」这类空标题
+        x: 横轴/类目字段名，必须与 SELECT 输出列名或别名一致（如 store_name、date）
+        y: 指标字段名列表，必须与 SELECT 输出列名或别名一致（如 ['revenue']）
+        """
+        ok, guarded = guard_sql(sql)
+        if not ok:
+            return {"ok": False, "error": guarded}
+        if chart_type not in CHART_TYPES:
+            return {"ok": False, "error": f"chart_type 仅支持 {list(CHART_TYPES)}"}
+        try:
+            cols, rows, truncated = await _execute(pool, guarded)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"SQL 执行失败: {type(e).__name__}: {e}"}
+
+        tables = _extract_tables(_strip_strings(guarded))
+        if not rows:
+            note = "查询结果为空"
+        elif truncated:
+            note = f"结果已截断，仅返回前 {MAX_ROWS} 行"
+        else:
+            note = None
+        return {
+            "ok": True,
+            "chart": build_chart_spec(chart_type, title, x, y, cols, rows),
+            "columns": cols,
+            "rows": rows,
+            "row_count": len(rows),
+            "source": {"tables": tables, "sql": guarded},
+            "note": note,
+        }
+
+    return [get_schema, query_data, render_chart]
