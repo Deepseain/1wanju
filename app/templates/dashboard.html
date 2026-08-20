@@ -577,8 +577,9 @@ body {
     <div class="dot">AI</div>
     <div>
       <div class="title">经营分析助手</div>
-      <div class="sub">AI 模块开发中 · 当前为占位回复</div>
+      <div class="sub">自然语言查数 · 数据来自本地数据库</div>
     </div>
+    <button class="ai-close" id="aiNew" title="新对话">↺</button>
     <button class="ai-close" id="aiClose">×</button>
   </div>
   <div class="ai-messages" id="aiMessages"></div>
@@ -942,12 +943,25 @@ const aiSend = document.getElementById('aiSend');
 document.getElementById('aiFab').addEventListener('click', () => {
   aiDrawer.classList.toggle('open');
   if (aiDrawer.classList.contains('open') && !aiMessages.children.length) {
-    appendMsg('ai', '您好，我是经营分析助手。当前 AI 模块正在开发中，'
-      + '您可以直接在下方留言，功能上线后会支持自然语言查数、经营洞察与自动日报。');
+    appendMsg('ai', '您好，我是经营分析助手，可以直接问我经营数据问题，'
+      + '例如「上周哪家门店营业额最高？」。回答仅来自本地数据库，查不到会如实说明。');
   }
   aiInput.focus();
 });
 document.getElementById('aiClose').addEventListener('click', () => aiDrawer.classList.remove('open'));
+
+function getThreadId() {
+  let id = localStorage.getItem('ai_thread_id');
+  if (!id) { id = 't_' + Date.now(); localStorage.setItem('ai_thread_id', id); }
+  return id;
+}
+
+function resetAiChat() {
+  localStorage.removeItem('ai_thread_id');
+  aiMessages.innerHTML = '';
+  appendMsg('ai', '已开始新对话。有什么想了解的经营数据？');
+}
+document.getElementById('aiNew').addEventListener('click', resetAiChat);
 
 document.querySelectorAll('.ai-suggest button').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -971,12 +985,9 @@ async function sendAi() {
   appendMsg('user', q);
   aiSend.disabled = true;
   try {
-    const chatHistory = Array.from(aiMessages.children)
-      .map(el => ({ role: el.classList.contains('ai') ? 'assistant' : 'user', content: el.textContent }))
-      .filter(m => m.content);
     const resp = await apiFetch('/api/ai/chat', {
       method: 'POST',
-      body: JSON.stringify({ messages: chatHistory })
+      body: JSON.stringify({ message: q, thread_id: getThreadId() })
     });
     const data = await resp.json();
     appendMsg('ai', data.reply || '（无回复）');

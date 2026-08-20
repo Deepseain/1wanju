@@ -4,6 +4,7 @@
 运行: E:/Anacoda/envs/agentLang/python.exe -m uvicorn main:app --port 5000
 """
 import hashlib
+import os
 import re
 import secrets
 import time
@@ -19,12 +20,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+from config import db_config
+from ai_agent.agent import RECURSION_LIMIT, build_agent
+from ai_agent.schema_cache import SchemaCache
+from ai_agent.tools import build_tools
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
 # ---------------- 配置 ----------------
-DB_CONFIG = dict(
-    host="127.0.0.1", port=3306, user="root",
-    password="xzh20050928@", db="Demo",
-    charset="utf8mb4", autocommit=True,
-)
 BASE_DIR = Path(__file__).parent
 TOKEN_TTL = 24 * 3600          # token 有效期 24h
 DEMO_USER = ("admin", "admin123")   # 首次启动自动写入
@@ -35,11 +37,16 @@ SESSIONS: dict[str, dict] = {}  # token -> {username, expires}
 pool: Optional[aiomysql.Pool] = None
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
+# ---------------- AI 模块（Text2SQL agent） ----------------
+schema_cache: Optional[SchemaCache] = None
+_checkpointer_cm = None          # AsyncSqliteSaver 上下文管理器（跨应用生命周期持有）
+ai_agent = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global pool
-    pool = await aiomysql.create_pool(minsize=1, maxsize=5, **DB_CONFIG)
+    pool = await aiomysql.create_pool(minsize=1, maxsize=5, **db_config())
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             # 用户表（不存在则创建）
@@ -76,7 +83,24 @@ async def lifespan(app: FastAPI):
                 "VALUES (%s, %s, %s, %s) "
                 "ON DUPLICATE KEY UPDATE nickname=VALUES(nickname), role=VALUES(role)",
                 (DEMO_USER[0], sha256(DEMO_USER[1]), "管理员", "admin"))
+
+    # AI 模块初始化（读 schema + 建 checkpointer + 组 agent；缺 key 优雅降级）
+    global schema_cache, _checkpointer_cm, ai_agent
+    schema_cache = SchemaCache()
+    await schema_cache.load(pool)
+    if os.environ.get("DEEPSEEK_API_KEY"):
+        data_dir = BASE_DIR / "data"
+        data_dir.mkdir(exist_ok=True)
+        _checkpointer_cm = AsyncSqliteSaver.from_conn_string(
+            str(data_dir / "ai_checkpoints.sqlite"))
+        checkpointer = await _checkpointer_cm.__aenter__()
+        ai_agent = build_agent(build_tools(pool, schema_cache), checkpointer)
+    else:
+        ai_agent = None  # 未配置 key：AI 接口返回提示，不影响看板其它功能
+
     yield
+    if _checkpointer_cm is not None:
+        await _checkpointer_cm.__aexit__(None, None, None)
     pool.close()
     await pool.wait_closed()
 
@@ -127,13 +151,9 @@ class RegisterBody(BaseModel):
     confirm: str = ""
 
 
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-
-
 class ChatBody(BaseModel):
-    messages: list[ChatMessage]
+    message: str
+    thread_id: str = ""
 
 
 # ---------------- 页面 ----------------
@@ -338,23 +358,28 @@ async def dashboard(start: Optional[str] = None, end: Optional[str] = None,
     }
 
 
-# ---------------- AI 对话（预留模块） ----------------
-async def call_ai(messages: list[ChatMessage]) -> str:
-    """AI 钩子：后续接入大模型（如智谱/DeepSeek）只需实现此函数。
-
-    可选进阶：
-    - 解析用户意图 -> 调用 /api/dashboard 聚合数据 -> 组装回答
-    - 使用 sse-starlette 做流式输出
-    - 结合 schema 做自然语言转 SQL（只读账号）
-    """
-    # TODO: 接入真实大模型
-    return ("AI 模块正在开发中，敬请期待。当前您可以问我预留的示例问题，"
-            "后续将支持自然语言查数、经营洞察与自动日报。")
+# ---------------- AI 对话（Text2SQL） ----------------
+async def call_ai(message: str, thread_id: str, username: str) -> str:
+    if ai_agent is None:
+        return "AI 模块未配置 DEEPSEEK_API_KEY，请设置该环境变量后重启服务。"
+    thread_key = f"{username}:{thread_id or '__default__'}"
+    config = {
+        "configurable": {"thread_id": thread_key},
+        "recursion_limit": RECURSION_LIMIT,
+    }
+    result = await ai_agent.ainvoke(
+        {"messages": [("user", message)]}, config=config)
+    reply = result["messages"][-1].content
+    if isinstance(reply, list):  # 部分模型返回 content blocks
+        reply = "".join(
+            part.get("text", "") if isinstance(part, dict) else str(part)
+            for part in reply)
+    return reply or "（无回复）"
 
 
 @app.post("/api/ai/chat")
-async def ai_chat(body: ChatBody, _: str = Depends(require_token)):
-    if not body.messages:
-        raise HTTPException(400, "messages 不能为空")
-    reply = await call_ai(body.messages)
+async def ai_chat(body: ChatBody, username: str = Depends(require_token)):
+    if not body.message.strip():
+        raise HTTPException(400, "message 不能为空")
+    reply = await call_ai(body.message.strip(), body.thread_id, username)
     return {"reply": reply}

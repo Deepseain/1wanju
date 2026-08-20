@@ -12,3 +12,11 @@ venv/
 *.log
 .DS_Store
 PLAN.md
+
+# AI 模块运行时产物（SQLite 对话检查点）
+app/data/
+
+# 本地环境配置（含真实密钥，不入库；模板见 app/.env.example）
+.env
+.env.*
+!.env.example
