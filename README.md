@@ -2,6 +2,11 @@
 
 > 连锁餐饮经营数据分析平台：以「数据看板」呈现 5 家门店的经营全貌，以「AI 助手」用自然语言随时查数、出图。
 
+<img width="2351" height="1263" alt="image" src="https://github.com/user-attachments/assets/e26cc7eb-dc57-42d7-b4c4-0146bc4030c4" />
+<img width="2115" height="1259" alt="image" src="https://github.com/user-attachments/assets/1509513b-8f33-4453-8a61-b82ff2ee814f" />
+<img width="1601" height="859" alt="image" src="https://github.com/user-attachments/assets/efe21831-1116-4961-9851-afcbbe10ce9f" />
+<img width="1600" height="742" alt="image" src="https://github.com/user-attachments/assets/f9fea38c-b20d-44a8-802d-2218139c50d2" />
+
 ---
 
 ## 项目背景
