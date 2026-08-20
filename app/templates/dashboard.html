@@ -306,7 +306,7 @@ body {
   right: 28px;
   bottom: 96px;
   width: 380px;
-  max-height: 560px;
+  height: 560px;
   background: #fff;
   border: 1px solid var(--card-border);
   border-radius: 16px;
@@ -326,6 +326,9 @@ body {
   padding: 14px 16px;
   border-bottom: 1px solid var(--card-border);
   background: linear-gradient(135deg, #F7F4FD, #fff);
+  cursor: move;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .ai-header .dot {
@@ -362,7 +365,7 @@ body {
   min-height: 200px;
 }
 
-.msg { max-width: 85%; font-size: 13px; line-height: 1.6; }
+.msg { max-width: 85%; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
 
 .msg.ai {
   align-self: flex-start;
@@ -437,6 +440,24 @@ body {
 .ai-input button:hover { background: #4C1D95; }
 .ai-input button:disabled { background: #C4B5FD; cursor: not-allowed; }
 
+/* 右下角缩放手柄 */
+.ai-resize {
+  position: absolute;
+  right: 0; bottom: 0;
+  width: 18px; height: 18px;
+  cursor: nwse-resize;
+  z-index: 6;
+}
+.ai-resize::after {
+  content: '';
+  position: absolute;
+  right: 4px; bottom: 4px;
+  width: 8px; height: 8px;
+  border-right: 2px solid #C4B5FD;
+  border-bottom: 2px solid #C4B5FD;
+  border-radius: 0 0 2px 0;
+}
+
 /* toast */
 .toast {
   position: fixed;
@@ -462,7 +483,7 @@ body {
   .kpi-grid { grid-template-columns: 1fr; }
   .date-filter { margin-left: 0; }
   .username { display: none; }
-  .ai-drawer { right: 12px; left: 12px; width: auto; }
+  .ai-drawer { right: 12px; left: 12px; width: auto; height: 70vh; }
 }
 </style>
 </head>
@@ -594,6 +615,7 @@ body {
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
     </button>
   </div>
+  <div class="ai-resize" id="aiResize"></div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -976,6 +998,26 @@ function appendMsg(role, text) {
   div.textContent = text;
   aiMessages.appendChild(div);
   aiMessages.scrollTop = aiMessages.scrollHeight;
+  return div;
+}
+
+function handleSse(raw, aiEl) {
+  let event = 'message', data = '';
+  for (const line of raw.split('\n')) {
+    if (line.startsWith('event:')) event = line.slice(6).trim();
+    else if (line.startsWith('data:')) data += line.slice(5).trim();
+  }
+  if (!data) return;
+  try {
+    const d = JSON.parse(data);
+    if (event === 'token') {
+      if (!aiEl.dataset.started) { aiEl.textContent = ''; aiEl.dataset.started = '1'; }
+      aiEl.textContent += d.content;
+    } else if (event === 'error') {
+      aiEl.textContent = aiEl.textContent || d.message || '服务暂时不可用';
+    }
+  } catch (_) { /* 忽略畸形帧 */ }
+  aiMessages.scrollTop = aiMessages.scrollHeight;
 }
 
 async function sendAi() {
@@ -984,22 +1026,81 @@ async function sendAi() {
   aiInput.value = '';
   appendMsg('user', q);
   aiSend.disabled = true;
+  const aiEl = appendMsg('ai', '正在查询数据…');
   try {
     const resp = await apiFetch('/api/ai/chat', {
       method: 'POST',
       body: JSON.stringify({ message: q, thread_id: getThreadId() })
     });
-    const data = await resp.json();
-    appendMsg('ai', data.reply || '（无回复）');
+    if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buffer.indexOf('\n\n')) >= 0) {
+        handleSse(buffer.slice(0, idx), aiEl);
+        buffer = buffer.slice(idx + 2);
+      }
+    }
   } catch (err) {
-    appendMsg('ai', '请求失败：' + (err.message || '网络异常'));
+    if (aiEl.dataset.started) {
+      aiEl.textContent += '\n（网络中断，请重试）';
+    } else {
+      aiEl.textContent = '请求失败：' + (err.message || '网络异常');
+    }
   } finally {
+    delete aiEl.dataset.started;
     aiSend.disabled = false;
+    aiMessages.scrollTop = aiMessages.scrollHeight;
   }
 }
 
 aiSend.addEventListener('click', sendAi);
 aiInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendAi(); });
+
+// ============ 抽屉拖拽 + 缩放 ============
+(function () {
+  const header = aiDrawer.querySelector('.ai-header');
+  const resize = document.getElementById('aiResize');
+  let drag = null, rs = null;
+
+  header.addEventListener('mousedown', (e) => {
+    if (e.target.closest('button')) return;   // 标题栏上的按钮不触发拖拽
+    const r = aiDrawer.getBoundingClientRect();
+    aiDrawer.style.right = 'auto';
+    aiDrawer.style.bottom = 'auto';
+    aiDrawer.style.left = r.left + 'px';
+    aiDrawer.style.top = r.top + 'px';
+    drag = { sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top };
+    e.preventDefault();
+  });
+
+  resize.addEventListener('mousedown', (e) => {
+    rs = { sx: e.clientX, sy: e.clientY, w: aiDrawer.offsetWidth, h: aiDrawer.offsetHeight };
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (drag) {
+      const nx = Math.min(Math.max(drag.ox + (e.clientX - drag.sx), 8), window.innerWidth - aiDrawer.offsetWidth - 8);
+      const ny = Math.min(Math.max(drag.oy + (e.clientY - drag.sy), 8), window.innerHeight - 60);
+      aiDrawer.style.left = nx + 'px';
+      aiDrawer.style.top = ny + 'px';
+    } else if (rs) {
+      const w = Math.max(300, Math.min(rs.w + (e.clientX - rs.sx), window.innerWidth - 16));
+      const h = Math.max(380, Math.min(rs.h + (e.clientY - rs.sy), window.innerHeight - 16));
+      aiDrawer.style.width = w + 'px';
+      aiDrawer.style.height = h + 'px';
+    }
+  });
+
+  window.addEventListener('mouseup', () => { drag = null; rs = null; });
+})();
 
 // ============ 启动 ============
 (async () => {

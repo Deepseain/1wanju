@@ -4,6 +4,7 @@
 运行: E:/Anacoda/envs/agentLang/python.exe -m uvicorn main:app --port 5000
 """
 import hashlib
+import json
 import os
 import re
 import secrets
@@ -15,7 +16,7 @@ from typing import Optional
 
 import aiomysql
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -358,28 +359,46 @@ async def dashboard(start: Optional[str] = None, end: Optional[str] = None,
     }
 
 
-# ---------------- AI 对话（Text2SQL） ----------------
-async def call_ai(message: str, thread_id: str, username: str) -> str:
+# ---------------- AI 对话（Text2SQL + SSE 流式） ----------------
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+async def stream_ai(message: str, thread_id: str, username: str):
+    """SSE 流式生成器：逐 token 推送最终回答，工具调用期间不推内容。"""
     if ai_agent is None:
-        return "AI 模块未配置 DEEPSEEK_API_KEY，请设置该环境变量后重启服务。"
+        yield _sse("error", {"message": "AI 模块未配置 DEEPSEEK_API_KEY，请设置该环境变量后重启服务。"})
+        return
     thread_key = f"{username}:{thread_id or '__default__'}"
     config = {
         "configurable": {"thread_id": thread_key},
         "recursion_limit": RECURSION_LIMIT,
     }
-    result = await ai_agent.ainvoke(
-        {"messages": [("user", message)]}, config=config)
-    reply = result["messages"][-1].content
-    if isinstance(reply, list):  # 部分模型返回 content blocks
-        reply = "".join(
-            part.get("text", "") if isinstance(part, dict) else str(part)
-            for part in reply)
-    return reply or "（无回复）"
+    try:
+        async for event in ai_agent.astream_events(
+            {"messages": [("user", message)]}, config=config, version="v2"
+        ):
+            kind = event.get("event")
+            if kind == "on_chat_model_stream":
+                chunk = event["data"].get("chunk")
+                content = getattr(chunk, "content", "") if chunk else ""
+                # deepseek 工具调用增量的 content 为空，直接跳过；仅推纯文本
+                if isinstance(content, str) and content:
+                    yield _sse("token", {"content": content})
+            elif kind == "on_tool_start":
+                yield _sse("tool", {"name": event.get("name", "")})
+        yield _sse("done", {})
+    except Exception as e:  # noqa: BLE001 —— 流异常不泄露内部细节
+        print(f"[ai] stream error: {type(e).__name__}: {e}")
+        yield _sse("error", {"message": "服务暂时不可用，请稍后再试"})
 
 
 @app.post("/api/ai/chat")
 async def ai_chat(body: ChatBody, username: str = Depends(require_token)):
     if not body.message.strip():
         raise HTTPException(400, "message 不能为空")
-    reply = await call_ai(body.message.strip(), body.thread_id, username)
-    return {"reply": reply}
+    return StreamingResponse(
+        stream_ai(body.message.strip(), body.thread_id, username),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
